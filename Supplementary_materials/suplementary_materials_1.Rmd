@@ -1,0 +1,1039 @@
+---
+title: "Supplementary material - What’s in the *r*? A review of the usage of the r symbol in the *Illustrations of the IPA*"
+author: "Anselme, Rémi, François Pellegrino & Dan Dediu"
+date: "`r Sys.time()`"
+output:
+  html_document: 
+    df_print: default
+    highlight: kate
+    theme: readable
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+  pdf_document: 
+    keep_tex: yes
+    toc: yes
+    toc_depth: 6
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# Include libraries:
+library(magrittr);
+library(dplyr);
+library(ggplot2);
+library(ggExtra);
+library(stringr);
+library(knitr);
+library(rstatix);
+library(sjPlot);
+library(gridExtra);
+library(forcats);
+library(networkD3);
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE)
+source("function_R_maps.R")
+source("function_R_sankey.R")
+source("function_R_cleaning.R")
+`%>%` <- magrittr::`%>%`
+# Figure and Table caption adapted from https://stackoverflow.com/questions/37116632/rmarkdown-html-number-figures: 
+outputFormat = opts_knit$get("rmarkdown.pandoc.to"); # determine the output format of the document
+if( is.null(outputFormat) ) outputFormat = ""; # probably not run within knittr
+capTabNo = 1; capFigNo = 1; # figure and table caption numbering, for HTML do it manually
+#Function to add the Table Number
+capTab = function(x){
+  if(outputFormat == 'html'){
+    x = paste0("***Table ",capTabNo,".*** _",x,"_")
+    capTabNo <<- capTabNo + 1
+  }; x
+}
+#Function to add the Figure Number
+capFig = function(x){
+  if(outputFormat == 'html'){
+    x = paste0("***Figure ",capFigNo,".*** _",x,"_")
+    capFigNo <<- capFigNo + 1
+  }; x
+}
+```
+
+
+```{r load data}
+systematic_review_IPA <- read.table("./systematic_review_IPA.csv", sep=",", header=TRUE, quote='"', stringsAsFactors=FALSE);
+# Fix the missing Afrikaans glottocode:
+systematic_review_IPA$glottocode[ systematic_review_IPA$Title == "Afrikaans" ] <- "afri1274"; # use generic "Africaans"
+# Add Glottolog family:
+# Check if the is already downloaded, otherwise download it!
+if( !file.exists("./glottolog_languoid.csv.zip") )
+{
+  # Downoad the data:
+  download.file("https://cdstar.shh.mpg.de/bitstreams/EAEA0-18EC-5079-0173-0/glottolog_languoid.csv.zip", "./glottolog_languoid.csv.zip");
+}
+# Unzip it:
+unzip("./glottolog_languoid.csv.zip", exdir="./glottolog");
+# Load the languages info:
+glottolg_info <- read.table("./glottolog/languoid.csv", header=TRUE, sep=",", quote='"');
+# Remove the unzipped folder (to avoid using disk space):
+unlink("./glottolog/", recursive=TRUE);
+systematic_review_IPA <- unique(merge(systematic_review_IPA, glottolg_info[,c("id", "family_id")], 
+                                      by.x="glottocode", by.y="id", all.x=TRUE, all.y=FALSE));
+systematic_review_IPA$family_id <- as.character(systematic_review_IPA$family_id);
+s <- (systematic_review_IPA$family_id == ""); systematic_review_IPA$family_id[s] <- systematic_review_IPA$glottocode[s]; # language isolates
+df <- systematic_review_IPA %>%
+  dplyr::group_by(Title) %>% 
+  dplyr::mutate(Sexe = ifelse(Sexe == "N", NA,Sexe),
+                Age_mean = ifelse(Age_mean == "N",NA,Age_mean)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Version = as.factor(Version),
+                Macroarea = as.factor(Macroarea),
+                Family = as.factor(family_id),
+                nb_speakers = as.numeric(nb_speakers),
+                Year = as.numeric(Year),
+                longitude = as.numeric(longitude),
+                latitude = as.numeric(latitude),
+                Age_mean = as.numeric(Age_mean));
+df2anal <- df %>%  dplyr::select(
+  Version,Title,
+  Macroarea,Family,glottocode,
+  Year,
+  longitude,latitude,
+  nb_speakers,
+  Sexe,Age_mean
+);
+arts_per_year      <- table(df2anal$Year); # articles per year
+mean_arts_per_year <- mean(arts_per_year); # mean articles per year
+age        <- (df2anal %>% dplyr::filter(!is.na(Age_mean)))$Age_mean; # informant age
+mu_age     <- mean(age); # mean informant age
+median_age <- median(age); # median informant age
+mean_nbSpeak   <- mean(df2anal$nb_speakers, na.rm=TRUE); # mean speaker population size
+median_nbSpeak <- median(df2anal$nb_speakers, na.rm=TRUE); # median speaker population size
+
+df2anal <- df2anal %>% dplyr::left_join(glottolg_info %>%
+                                dplyr::select(id,name) %>% 
+                                dplyr::rename(Family=id),by="Family")
+df2anal %>% dplyr::mutate(name = as.character(name)) -> df2anal
+
+
+rm(glottolg_info,df,systematic_review_IPA); # free memory                
+```
+
+```{r fig.cap=capFig("Distribution of the languages covered by the *Illustrations of the IPA* (not included in the article). All coordinates for all datapoints were retreived manually based on the information available in the *Illustrations*.")}
+
+base_world + 
+  ggplot2::geom_point(data = df2anal ,
+                      ggplot2::aes(x=longitude, y=latitude),
+            size=2, alpha=1)+
+  ggplot2::scale_fill_viridis_d() +
+  ggplot2::ggtitle(NULL) + 
+  ggplot2::theme(legend.position="bottom")
+```
+
+
+# Results
+
+## General results
+
+### Year of publication
+
+Here we look at the number of articles published each year.
+
+```{r fig.cap=capFig("Number of publications per year (yellow bars) with their average across all years (horizontal blue dashed line). Please note that some very recent Illustrations might not yet be included in an official issue but only available on the journal’s website as preprints.")}
+
+d <- as.data.frame(arts_per_year); names(d) <- c("year", "n_articles"); d$year <- as.numeric(as.character(d$year));
+ggplot(d, aes(x=year, y=n_articles)) + 
+  geom_bar(stat="identity", fill="gold", color="black") + 
+  geom_text(aes(label=n_articles), vjust=-0.5, color="black", position = position_dodge(0.9), size=4.0)+
+  theme_light() +
+  geom_hline(yintercept=mean_arts_per_year, color="blue", linetype="dashed") +
+  xlab("Year of publication") + ylab("Number of published articles") + 
+  theme(axis.text.x = element_text(angle = 45, hjust=1,size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16)) +
+  NULL;
+
+```
+
+* `r nrow(dplyr::filter(df2anal,Year < 2000))` Illustrations were published before 2000.
+
+### Informant characteristics
+
+Here we look at the informant characteristics.
+
+```{r fig.cap=capFig("The distribution of the sex of the informant(s). Notations: F = Female; M = Male; B = the recording of 1M & 1F used for the transcription; NA = data not communicated.")}
+
+tmp <- table(df2anal$Sexe, useNA="ifany")
+ggplot(as.data.frame(table(df2anal$Sexe, useNA="ifany")), aes(x=Var1, y=Freq, fill=Var1)) +
+  geom_bar(stat="identity", color="black") + 
+  geom_text(aes(label=Freq), vjust=1.6, color="black", position = position_dodge(0.9), size=4.0)+
+  xlab("Sex") + ylab("Count") + scale_fill_viridis_d("Sex") + 
+  theme_light() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16)) +
+  NULL;
+
+```
+
+```{r fig.cap=capFig("The distribution of the age of the informant(s) with mean 41 (red dashed vertical line) and median (blue dashed vertical line.")}
+
+ggplot(data.frame("age"=age), aes(age)) + 
+  geom_histogram(fill="gold", color="black") +
+  geom_vline(xintercept=mu_age, color="red", linetype="dashed") +
+  geom_vline(xintercept=median_age, color="blue", linetype="dashed") +
+  theme_light() +
+  xlab("Age") + ylab("Count") +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16)) +
+  NULL
+
+```
+
+### Geographic distribution, families and population size
+
+#### Macroareas
+
+```{r fig.cap=capFig("Distribution of languages by macroarea.")}
+
+ggplot(as.data.frame(table(df2anal$Macroarea, useNA="ifany")) %>%
+         mutate(Var1=ifelse(Var1=="africa","Africa",
+                ifelse(Var1=="australia","Australia",
+                ifelse(Var1=="eurasia","Eurasia",
+                ifelse(Var1=="north_america","North America",
+                ifelse(Var1=="papunesia","Papunesia",
+                ifelse(Var1=="south_america","South America",Var1)))))))  %>%
+         mutate(Var1 = fct_reorder(Var1, desc(Var1))), aes(x=Var1, y=Freq, fill=Var1)) +
+  geom_bar(stat="identity", color="black") +
+  geom_text(aes(label=Freq), hjust=1.5, color="black", position = position_dodge(0.9), size=4.0)+
+  xlab("Macroarea") + ylab("Count") +
+  scale_fill_viridis_d("Macroarea",
+                       labels=c("Africa"="Africa", "Australia"="Australia", "Eurasia"="Eurasia", "North America"="N. America", "Papunesia"="Papunesia", "South America"="S. America")) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  theme_light() +
+  xlab("Macroarea") + ylab("Count") +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16),
+        legend.position = "none") +
+  coord_flip() +
+  NULL;
+
+```
+
+It can be seen that there is an over-representation of Eurasian languages, with just a few Australian languages.
+
+#### Language families
+
+
+```{r fig.cap=capFig("Distribution of languages by family."), fig.dim = c(8, 8)}
+
+ggplot(as.data.frame(table(df2anal$name, useNA="ifany")) %>% 
+         mutate(Var1 = fct_reorder(Var1, desc(Var1))), aes(x=Var1, y=Freq)) +
+  geom_bar(stat="identity", color="black", fill="gold") + 
+  geom_text(aes(label=Freq), hjust=-0.5, color="black", position = position_dodge(0.9), size=3.0)+
+  xlab("Family") + ylab("Count") + 
+  theme_light() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16),
+        legend.position = "none") +
+  coord_flip() +
+  NULL;
+```
+
+Indo-european languages are over-sampled.
+
+#### Speaker population size
+
+```{r fig.cap=capFig("The distribution of the log speaker population size, showing the mean (12,000,000 or 7.08 on the log scale; red dashed vertical line) and the median (175,000 or 5.24 on log scale blue dashed vertical line)")}
+
+ggplot(data.frame("log_pop_size"=log10(df2anal$nb_speakers)), aes(log_pop_size)) + 
+  geom_histogram(fill="gold", color="black") +
+  geom_vline(xintercept=log10(mean(df2anal$nb_speakers,na.rm=TRUE)), color="red", linetype="dashed") +
+  geom_vline(xintercept=log10(median(df2anal$nb_speakers,na.rm=TRUE)), color="blue", linetype="dashed") +
+  theme_light() +
+  xlab("Speaker population size (log'ed)") + ylab("Count") +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=16),
+        axis.title.y = element_text(size=16),
+        legend.position = "none") +
+  NULL
+
+```
+
+
+## Transcriptions
+
+```{r}
+
+systematic_review_IPA_counts <- readr::read_csv("./systematic_review_IPA_counts.csv")
+systematic_review_IPA_counts$glottocode[systematic_review_IPA_counts$Title == "Afrikaans" ] <- "afri1274"; # use generic "Africaans"
+
+```
+
+
+### Phonetic and phonemic transcriptions
+
+We give the followings counts for the classification of the transcriptions before any revision:
+
+*  `r nrow(systematic_review_IPA_counts[systematic_review_IPA_counts$quality_ling_trans == "both" & !is.na(systematic_review_IPA_counts$quality_ling_trans),])` illustrations with a phonetic transcription and a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts[systematic_review_IPA_counts$quality_ling_trans == "phonetic" & !is.na(systematic_review_IPA_counts$quality_ling_trans),])` illustrations with only a phonetic transcription
+*  `r nrow(systematic_review_IPA_counts[systematic_review_IPA_counts$quality_ling_trans == "phonemic" & !is.na(systematic_review_IPA_counts$quality_ling_trans),])` illustrations with only a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts[systematic_review_IPA_counts$quality_ling_trans == "unknown" & !is.na(systematic_review_IPA_counts$quality_ling_trans),])` illustrations for which we lack information
+*  `r nrow(systematic_review_IPA_counts[is.na(systematic_review_IPA_counts$quality_ling_trans),])` illustration with no transcription
+
+We decided to consider that all transcriptions lacking of explicit mention of *phonetic*/*phonemic*/*broad*/*narrow* (here considered as *unknown*) should be considered as *phonetic*.
+So, over the  `r nrow(systematic_review_IPA_counts)` illustrations, we have in total :
+
+*  `r length(systematic_review_IPA_counts$phonetic[!is.na(systematic_review_IPA_counts$phonetic)])` phonetic transcriptions
+*  `r length(systematic_review_IPA_counts$phonemic[!is.na(systematic_review_IPA_counts$phonemic)])` phonemic transcriptions
+
+Including: 
+
+*  `r nrow(systematic_review_IPA_counts[!is.na(systematic_review_IPA_counts$phonetic) & !is.na(systematic_review_IPA_counts$phonemic),])` illustrations with a phonetic transcription and a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts[!is.na(systematic_review_IPA_counts$phonetic) & is.na(systematic_review_IPA_counts$phonemic),])` illustrations with only a phonetic transcription
+*  `r nrow(systematic_review_IPA_counts[is.na(systematic_review_IPA_counts$phonetic) & !is.na(systematic_review_IPA_counts$phonemic),])` illustrations with only a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts[is.na(systematic_review_IPA_counts$phonetic) & is.na(systematic_review_IPA_counts$phonemic),])` illustrations with no transcription
+
+### Orthographic transcription and transliteration
+
+Among the illustrations, there are several orthographic systems among which the Latin alphabet. It should be taken into account that not all the languages studied have an orthographic system.
+
+So, over the  `r nrow(systematic_review_IPA_counts)` illustrations, we have in total :
+
+* `r nrow(dplyr::filter(systematic_review_IPA_counts,r_present_in_ortho == 1))` illustrations with an `<r>` in the orthography of the language or in its transliteration
+    + `r nrow(dplyr::filter(systematic_review_IPA_counts,stringr::str_detect(orthography_comments,"rr(?!a|o)|double|two")))` illustrations for which *a priori* double `<rr>` exist in the orthographic system
+* `r nrow(dplyr::filter(systematic_review_IPA_counts,r_present_in_ortho == 0))` illustrations without *a priori* an `<r>` in the orthography of the language
+* And `r nrow(dplyr::filter(systematic_review_IPA_counts,is.na(r_present_in_ortho)))` illustrations where nothing can be said because either the language has no spelling, or the language is written in another system than the Latin alphabet (and no transliteration is given).
+
+## ‘r-like’ sounds
+
+### r in transcriptions
+
+```{r}
+withR_IPA <- systematic_review_IPA_counts %>% dplyr::filter(phonetic > 0 | phonemic > 0 | stringr::str_detect(transcription_phon,"r") == TRUE |
+                              stringr::str_detect(phoneme,"r") == TRUE)
+```
+
+As we are mainly interested in *r*, we have chosen to analyze only some illustrations.
+We counted the possible cases with an *r*. In other words, we looked at the illustrations where:
+
+* There is an /r/ present in the consonant table of the illustration
+* There is at least one [r] or /r/ in one of the transcriptions
+
+```{r fig.cap=capFig("Distribution of the languages where at least an *r* was found in a transcription of the narrative and/or in the consonant chart of the Illustration.")}
+
+base_world + 
+  ggplot2::geom_point(data = systematic_review_IPA_counts %>% dplyr::left_join((df2anal %>%
+                                    dplyr::select(glottocode,Title,
+                                                  latitude,longitude) %>% 
+                                    dplyr::mutate(`r presence` = ifelse(glottocode %in% 
+                                                              withR_IPA$glottocode, "Yes",
+                                                              "No"))),
+                                    by="glottocode"),
+                      ggplot2::aes(x=longitude, y=latitude, fill=`r presence`),
+             pch=21, color="black",size=2, alpha=1)+
+  ggplot2::scale_fill_viridis_d() +
+  ggplot2::ggtitle(NULL) + 
+  ggplot2::theme(legend.position="bottom")
+
+```
+
+This gives us `r nrow(withR_IPA)` illustrations to work with including :
+
+* `r nrow(dplyr::filter(withR_IPA,stringr::str_detect(phoneme, "r") == TRUE))` illustrations with at least one /r/ of which :
+  + `r nrow(dplyr::filter(withR_IPA,stringr::str_detect(phoneme, "r") == TRUE & stringr::str_detect(rhotics, "rill|olled") == TRUE))` have "trill" or "rolled" in their name
+  + `r nrow(dplyr::filter(withR_IPA,stringr::str_detect(phoneme, "r") == TRUE & stringr::str_detect(rhotics, "rill|olled") == FALSE))` do not have "trill" or "rolled" in their name
+  + `r nrow((dplyr::filter(withR_IPA,stringr::str_detect(phoneme, "r") == TRUE & is.na(rhotics))))` have no description in terms of place and way of articulation of the symbol
+
+All the following the following Sankey diagrams have been retouched on Inkscape add labels and change the aesthetics before to be included in the final manuscript.
+
+#### Illustrations with both phonemic and phonetic transcriptions
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with both phonemic and phonetic transcriptions when there is at least one r in the Illustration, focusing on the phonemic transcription (left), the consonant chart (middle) and the phonetic transcription (right). Plus symbol + means the presence of a symbol in the narrative transcriptions and minus symbol - its absence.")}
+withR_IPA %>%
+    dplyr::filter(!is.na(phonetic) & !is.na(phonemic)) %>% 
+create_Sankey_diagram_both()
+```
+
+#### Illustrations with a phonetic transcription only
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with a phonetic transcription only when there is at least one r in the Illustration, focusing on the consonant chart (left) or on the phonetic transcription (right).")}
+withR_IPA %>%
+    dplyr::filter(!is.na(phonetic) & is.na(phonemic)) %>% 
+create_Sankey_diagram_phonetic()
+```
+
+#### Illustrations with a phonemic transcription only
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with a phonemic transcription only when there is at least one r in the Illustration, focusing on the consonant chart (left) or on the phonemic transcription (right).")}
+withR_IPA %>%
+    dplyr::filter(is.na(phonetic) & !is.na(phonemic)) %>% 
+create_Sankey_diagram_phonemic()
+```
+
+### ‘r-like’ sound frequencies
+
+```{r data load}
+transcriptions_table <- readr::read_delim("transcriptions_table.txt", 
+    delim = "$")
+
+transcriptions_table_OCR_manu <- readr::read_delim("transcriptions_table_OCR_manu.txt", 
+    delim = "$")
+```
+
+In order to be able to count all the segments present in the transcriptions of the narrations we have used several ways to have the numerical transcriptions  :
+
+* some transcriptions are available in text format (.txt) from Baird and al. (2021) (available on: https://github.com/SimonGreenhill/jipa)
+* when possible, some transcriptions were copy-pasted from the PDF of the Illustrations or from the Illustration web page hosted by the Journal of the IPA.
+* some transcriptions from which copy-pasting was not possible were submitted to Optical character recognition (OCR) using the R package tesseract (Ooms, 2021). This was trained by default with English written data, and, while it is possible to change the language, as there was no IPA training set, we decided to use the default parameters. The result was a text with characters found in English (for example, ʔ was recognised as ?, ŋ as n or g, ɾ as j or r). We manually checked the results to verify that no extra segment was added or deleted during the OCR process. [It is important to note that it have been something once consider by the association to develop ‘ Optical Character Recognition (OCR) for IPA symbols so that electronic versions of articles could be fully searchable’ (Keating: 363 in Keating, Patricia A. 2015. IPA GENERAL MEETING 2015. *Journal of the International Phonetic Association*, 45(3), 360-364), yet it is not yet the case.
+* finally, we manually typed those transcriptions which contained too many diacritics and suprasegmental segments which could potentially lead to poor OCR results with too many extra segments added. In these cases we have manually copied the texts by systematically replacing the IPA characters by latin characters without any diacritics based on the assumption that the majority of the IPA symbols actually derives from latin characters (e.g., the Central Malagasy transcription [əˈvàɾəʈ̬͡ʂ̬ə] ‘north’ would became ‘evaretse’).
+
+All transcriptions were saved in dataframes in .txt files depending on depending on how they were obtained.
+ 
+```{r data preparation}
+jipa_texts <- transcriptions_table %>% 
+  dplyr::rename(glottocode = Glottocodes) %>% 
+  dplyr::bind_rows(transcriptions_table_OCR_manu) %>% 
+  dplyr::filter(transcription!="NO TRANS") %>%
+  clean_data()
+
+
+sIPA_counts <- systematic_review_IPA_counts %>%
+                  dplyr::select(glottocode,transcription_phon,phoneme,
+                                phonetic,phonemic,tap_pt,tap_pm,total_rhotics) %>% 
+              dplyr::left_join(jipa_texts,by="glottocode") %>% 
+              dplyr::mutate(rhoticity = total_rhotics/text_count,
+                            trill_pt_rhoticity = phonetic/total_rhotics,
+                            trill_pm_rhoticity = phonemic/total_rhotics,
+                            tap_pt_rhoticity = tap_pt/total_rhotics,
+                            tap_pm_rhoticity = tap_pm/total_rhotics,
+                            trill_pm_freq = phonemic/text_count,
+                            trill_pt_freq = phonetic/text_count,
+                            tap_pm_freq = tap_pm/text_count,
+                            tap_pt_freq = tap_pt/text_count)
+
+
+withR_IPA <- sIPA_counts %>% dplyr::filter(phonetic > 0 | phonemic > 0 | stringr::str_detect(transcription_phon,"r") == TRUE |
+                              stringr::str_detect(phoneme,"r") == TRUE)
+
+withTAP_IPA <- sIPA_counts %>% dplyr::filter(tap_pt > 0 | tap_pm > 0 | stringr::str_detect(transcription_phon,"ɾ") == TRUE |
+                                             stringr::str_detect(phoneme,"ɾ") == TRUE) 
+
+```
+
+#### Overall rhoticity
+
+```{r fig.cap=capFig("Overall rhoticity")}
+
+plot_overall_rhoticity <- withR_IPA  %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=rhoticity)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point() +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Rhoticity")
+
+ggExtra::ggMarginal(plot_overall_rhoticity,type = "histogram") 
+
+```
+
+We give the following values for the segments count:
+
+* Maximum = `r max(withR_IPA$text_count,na.rm = TRUE)`
+* Minimum = `r min(withR_IPA$text_count,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA$text_count,na.rm = TRUE),1)`
+* Median = `r median(withR_IPA$text_count,na.rm = TRUE)`
+* Standard deviation (sd) = `r round(sd(withR_IPA$text_count,na.rm = TRUE),1)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA$text_count,na.rm = TRUE),1)`
+
+We give the following values for the rhoticity frequency:
+
+* Maximum = `r round(max(withR_IPA$rhoticity,na.rm = TRUE),3)`
+* Minimum = `r min(withR_IPA$rhoticity,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA$rhoticity,na.rm = TRUE),3)`
+* Median = `r round(median(withR_IPA$rhoticity,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withR_IPA$rhoticity,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA$rhoticity,na.rm = TRUE),3)`
+
+
+#### Trill frequency
+
+```{r fig.cap=capFig("Phonetic trills frequency")}
+
+plot_trill_pt_frequency <- withR_IPA %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=trill_pt_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Trill [r] frequency")
+
+ggExtra::ggMarginal(plot_trill_pt_frequency,type = "histogram")
+
+
+```
+
+We give the following values for the phonetic trill frequency:
+
+* Maximum = `r round(max(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withR_IPA$trill_pt_freq,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`
+
+`r nrow(dplyr::select(withR_IPA,trill_pt_freq) %>%  dplyr::filter(trill_pt_freq == 0))` Illustrations that do not contain [r] in their transcription.
+
+```{r data preparation for wilcoxon test}
+withR_IPA_wilcox <- dplyr::select(withR_IPA,glottocode,rhoticity,trill_pt_freq) %>% 
+  tidyr::gather(key="Parameters",value="Value",rhoticity,trill_pt_freq)
+
+
+wilcox_trill_rhoticity <- rstatix::wilcox_test(withR_IPA_wilcox, Value ~ Parameters,
+                                               alternative="greater")
+```
+
+We performed a Wilcoxon test showing that the trill frequency is thus significantly lower than the mean of rhoticity (*p*=`r as.character(wilcox_trill_rhoticity[1,"p"])`).
+
+```{r data preparation for counts where pt_trill different of total_rhotics}
+count_illustrations_diff_rho_trill <- withR_IPA %>% 
+  dplyr::filter(!is.na(phonetic) & phonetic!=total_rhotics) %>% 
+  dplyr::mutate(phoneme_count = ifelse(phoneme == "no",0,
+                                       stringr::str_count(phoneme,"&") + 1),
+                phoneme_count = ifelse(phoneme_count>2,2,phoneme_count)) %>% 
+  dplyr::select(phoneme_count) %>%  table()
+```
+
+* `r count_illustrations_diff_rho_trill[[2]]` Illustrations where there is only one rhotic segment in consonant chart
+* `r count_illustrations_diff_rho_trill[[3]]` Illustrations where there is more than one rhotic segment in consonant chart
+* `r count_illustrations_diff_rho_trill[[1]]` Illustrations where there is no rhotic segment in consonant chart
+
+```{r fig.cap=capFig("Phonemic trills frequency")}
+
+plot_trill_pm_frequency <- withR_IPA %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=trill_pm_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Trill /r/ frequency")
+
+ggExtra::ggMarginal(plot_trill_pm_frequency,type = "histogram")
+
+```
+
+We give the following values for the phonemic trill frequency:
+
+* Maximum = `r round(max(withR_IPA$trill_pm_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withR_IPA$trill_pm_freq,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA$trill_pm_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withR_IPA$trill_pm_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withR_IPA$trill_pm_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA$trill_pm_freq,na.rm = TRUE),3)`
+
+Phonemic trill average frequency `r round(mean(withR_IPA$trill_pm_freq,na.rm = TRUE),3)` is smaller than the average rhoticity `r round(mean(withR_IPA$rhoticity,na.rm = TRUE),3)`.
+Phonemic trill average frequency `r round(mean(withR_IPA$trill_pm_freq,na.rm = TRUE),3)` higher than that of the phonetic trill `r round(mean(withR_IPA$trill_pt_freq,na.rm = TRUE),3)`.
+
+```{r data preparation for Kruskal–Wallis test for trill}
+
+kruskal_wallis_trill <- withR_IPA %>% dplyr::select(glottocode,rhoticity,trill_pt_freq,trill_pm_freq) %>% 
+  dplyr::group_by(glottocode) %>% 
+  tidyr::gather(key=Parameters,value=Value,rhoticity,trill_pt_freq,trill_pm_freq) 
+
+
+res.kruskal_trill <-  kruskal_wallis_trill %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_trill <- kruskal_wallis_trill %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::dunn_test(Value ~ Parameters) 
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic trill, phonetic trill and rhoticity followed by a Dunn post hoc test.
+There are any significant differences for frequency values of phonemic trill, phonetic trill and rhoticity (*H*(`r res.kruskal_trill[1,"df"][1]`)=`r res.kruskal_trill[1,"statistic"]`,*p*=`r as.character(res.kruskal_trill[1,"p"])`).
+The post hoc Dunn test shows that all the pairwise differences are statistically significantly different (*p_values* = `r paste0(as.character(round(pwc_trill[1,"p.adj"],5)),", ",as.character(pwc_trill[2,"p.adj"]),", ",as.character(round(pwc_trill[3,"p.adj"],5)))`).
+
+#### Tap frequency
+
+We give the following values for the segments count in this new sample of `r nrow(withTAP_IPA)` *Illustrations*, the average rhoticity is `r round(mean(withTAP_IPA$rhoticity),3)`:
+
+* Maximum = `r max(withTAP_IPA$text_count,na.rm = TRUE)`
+* Minimum = `r min(withTAP_IPA$text_count,na.rm = TRUE)`
+* Mean = `r round(mean(withTAP_IPA$text_count,na.rm = TRUE))`
+* Median = `r median(withTAP_IPA$text_count,na.rm = TRUE)`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA$text_count,na.rm = TRUE),1)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA$text_count,na.rm = TRUE),1)`
+
+```{r fig.cap=capFig("Phonemtic taps frequency")}
+
+plot_tap_pt_freequency <- withTAP_IPA  %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=tap_pt_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point() +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Tap [ɾ] frequency")
+
+ggExtra::ggMarginal(plot_tap_pt_freequency,type = "histogram")
+
+```
+
+We give the following values for the phonetic trill frequency:
+
+* Maximum = `r round(max(withTAP_IPA$tap_pt_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withTAP_IPA$tap_pt_freq,na.rm = TRUE)` (corresponding to `r nrow(dplyr::filter(withTAP_IPA,tap_pt == 0))` *Illustrations* that does not contain a ɾ tap symbol.)
+* Mean = `r round(mean(withTAP_IPA$tap_pt_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withTAP_IPA$tap_pt_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA$tap_pt_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA$tap_pt_freq,na.rm = TRUE),3)`
+
+```{r fig.cap=capFig("Phonemic taps frequency")}
+
+plot_tap_pm_freequency <- withTAP_IPA  %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=tap_pm_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Tap /ɾ/ frequency")
+
+ggExtra::ggMarginal(plot_tap_pm_freequency,type = "histogram")
+
+```
+
+We give the following values for the phonemic trill frequency:
+
+* Maximum = `r round(max(withTAP_IPA$tap_pm_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withTAP_IPA$tap_pm_freq,na.rm = TRUE)` 
+* Mean = `r round(mean(withTAP_IPA$tap_pm_freq,na.rm = TRUE),2)`
+* Median = `r round(median(withTAP_IPA$tap_pm_freq,na.rm = TRUE))`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA$tap_pm_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA$tap_pm_freq,na.rm = TRUE),3)`
+
+```{r data preparation for Kruskal–Wallis test for taps}
+
+kruskal_wallis_tap <- withTAP_IPA %>% dplyr::select(glottocode,rhoticity,tap_pt_freq,tap_pm_freq) %>% 
+  dplyr::group_by(glottocode) %>% 
+  tidyr::gather(key=Parameters,value=Value,rhoticity,tap_pt_freq,tap_pm_freq) 
+
+
+res.kruskal_tap <-  kruskal_wallis_tap %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_tap <- kruskal_wallis_tap %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::dunn_test(Value ~ Parameters) 
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity followed by a Dunn post hoc test.
+There are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity (*H*(`r res.kruskal_tap[1,"df"][1]`)=`r res.kruskal_tap[1,"statistic"]`,*p*=`r as.character(res.kruskal_tap[1,"p"])`).
+The post hoc Dunn test shows that all the pairwise differences are statistically significantly different (*p_values* = `r paste0(as.character(pwc_tap[1,"p.adj"]),", ",as.character(pwc_tap[2,"p.adj"]),", ",as.character(pwc_tap[3,"p.adj"]))`).
+
+```{r data preparation for Kruskal–Wallis test for taps and trills}
+
+kruskal_wallis_trill_tap <- dplyr::bind_rows(kruskal_wallis_trill,kruskal_wallis_tap) %>% 
+  dplyr::distinct() %>% 
+  dplyr::ungroup() %>% 
+  dplyr::filter(!is.na(Value))
+
+res.kruskal_trill_tap <-  kruskal_wallis_trill_tap %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_trill_tap <- kruskal_wallis_trill_tap %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  rstatix::dunn_test(Value ~ Parameters)
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic trill, phonemic tap, phonetic trill, phonetic tap and rhoticity followed by a Dunn post hoc test.
+
+There are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity (*H*(`r res.kruskal_trill_tap[1,"df"][1]`)=`r res.kruskal_trill_tap[1,"statistic"]`,*p*=`r as.character(res.kruskal_trill_tap[1,"p"])`).
+The post hoc Dunn test shows that:
+
+* phonetic trills [r] frequency was not significantly different from the phonemic taps frequency /ɾ/ (*p_value* = `r as.character(pwc_trill_tap[7,"p.adj"])`)
+* phonemic trills /r/ frequency was not significantly different from the phonetic tap [ɾ] frequency (*p_value* = `r as.character(pwc_trill_tap[8,"p.adj"])`)
+* /r/ are more frequent than /ɾ/ (*p_value* = `r as.character(pwc_trill_tap[6,"p.adj"])`)
+* [r] is less frequent than [ɾ] (*p_value* = `r as.character(pwc_trill_tap[9,"p.adj"])`)
+
+## Re-analysis based on Associate Editor comments
+
+```{r}
+systematic_review_IPA_counts_corr <- systematic_review_IPA_counts %>% 
+  dplyr::mutate(phonemic = dplyr::case_when(is.na(new_symbols_narr) == TRUE ~ phonemic,
+                                            new_symbols_narr == "no" ~ phonetic,
+                                            new_symbols_narr == "yes" ~ as.numeric(NA)),
+                tap_pm = dplyr::case_when(is.na(new_symbols_narr) == TRUE ~ tap_pm,
+                                            new_symbols_narr == "no" ~ tap_pt,
+                                            new_symbols_narr == "yes" ~ as.numeric(NA))) %>% 
+  dplyr::mutate(phonetic = dplyr::case_when(is.na(new_symbols_narr) == TRUE ~ phonetic,
+                                            new_symbols_narr == "no" ~ as.numeric(NA),
+                                            new_symbols_narr == "yes" ~ phonetic),
+                tap_pt = dplyr::case_when(is.na(new_symbols_narr) == TRUE ~ tap_pt,
+                                            new_symbols_narr == "no" ~ as.numeric(NA),
+                                            new_symbols_narr == "yes" ~ tap_pt))  %>% 
+  dplyr::mutate(new_class = dplyr::case_when(quality_ling_trans == "phonetic" ~ "phonetic",
+                                             quality_ling_trans == "phonemic" ~ "phonemic",
+                                             quality_ling_trans == "both" ~ "both",
+                                             quality_ling_trans == "unknown" & new_symbols_narr == "yes" ~ "phonetic",
+                                             quality_ling_trans == "unknown" & new_symbols_narr == "no" ~ "phonemic"
+                                             
+  ))
+```
+
+
+```{r}
+withR_IPA_corr <- systematic_review_IPA_counts_corr %>% dplyr::filter(phonetic > 0 | phonemic > 0 | stringr::str_detect(transcription_phon,"r") == TRUE |
+                              stringr::str_detect(phoneme,"r") == TRUE)
+```
+
+```{r}
+# withR_IPA_corr %>% 
+#   dplyr::select(quality_ling_trans,new_symbols_narr) %>% table() 
+```
+
+
+We decided to re-consider that all transcriptions lacking of explicit mention of *phonetic*/*phonemic*/*broad*/*narrow* (here considered as *unknown*) should be considered as *phonetic* or *phonemic* depending on the comparison of the symbols present in the consonant chart and those present in the narrative transcription. If some segments were present in the narrative but not in the consonant chart, then the transcription could be considered as *phonetic* otherwise it would be *phonemic*.
+
+So, over the  `r nrow(systematic_review_IPA_counts_corr)` illustrations, we have in total :
+
+*  `r length(systematic_review_IPA_counts_corr$phonetic[!is.na(systematic_review_IPA_counts_corr$phonetic)])` phonetic transcriptions
+*  `r length(systematic_review_IPA_counts_corr$phonemic[!is.na(systematic_review_IPA_counts_corr$phonemic)])` phonemic transcriptions
+
+Including: 
+
+*  `r nrow(systematic_review_IPA_counts_corr[!is.na(systematic_review_IPA_counts_corr$phonetic) & !is.na(systematic_review_IPA_counts_corr$phonemic),])` illustrations with a phonetic transcription and a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts_corr[!is.na(systematic_review_IPA_counts_corr$phonetic) & is.na(systematic_review_IPA_counts_corr$phonemic),])` illustrations with only a phonetic transcription
+*  `r nrow(systematic_review_IPA_counts_corr[is.na(systematic_review_IPA_counts_corr$phonetic) & !is.na(systematic_review_IPA_counts_corr$phonemic),])` illustrations with only a phonemic transcription
+*  `r nrow(systematic_review_IPA_counts_corr[is.na(systematic_review_IPA_counts_corr$phonetic) & is.na(systematic_review_IPA_counts_corr$phonemic),])` illustrations with no transcription
+
+As an exemple of *Illustrations* with an *r* we give the following:
+
+
+
+```{r}
+withR_IPA_corr %>% 
+  dplyr::filter(!is.na(new_symbol_comment),
+                stringr::str_detect(new_symbol_comment,"trill|tap|rhotic")) %>% 
+  dplyr::select(Title,quality_ling_trans,new_symbol_comment) %>% 
+  knitr::kable()
+```
+
+We also give example where other symbols were used to decide either the transcription was *phonetic* or *phonemic* :
+```{r}
+withR_IPA_corr %>% 
+  dplyr::filter(!is.na(new_symbol_comment),
+                !stringr::str_detect(new_symbol_comment,"trill|tap|rhotic")) %>% 
+  dplyr::select(Title,quality_ling_trans,new_symbol_comment) %>% 
+  knitr::kable()
+```
+
+As we are mainly interested in *r*, we have chosen to analyze only some illustrations.
+We counted the possible cases with an *r*. In other words, we looked at the illustrations where:
+
+* There is an /r/ present in the consonant table of the illustration
+* There is at least one [r] or /r/ in one of the transcriptions
+
+This gives us `r nrow(withR_IPA_corr)` illustrations to work with.
+  
+#### Illustrations with both phonemic and phonetic transcriptions _corr
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with both phonemic and phonetic transcriptions when there is at least one r in the Illustration, focusing on the phonemic transcription (left), the consonant chart (middle) and the phonetic transcription (right). Plus symbol + means the presence of a symbol in the narrative transcriptions and minus symbol - its absence. _corr")}
+withR_IPA_corr %>%
+    dplyr::filter(!is.na(phonetic) & !is.na(phonemic)) %>% 
+create_Sankey_diagram_both()
+```
+
+#### Illustrations with a phonetic transcription only _corr
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with a phonetic transcription only when there is at least one r in the Illustration, focusing on the consonant chart (left) or on the phonetic transcription (right). _corr")}
+withR_IPA_corr %>%
+    dplyr::filter(!is.na(phonetic) & is.na(phonemic)) %>% 
+create_Sankey_diagram_phonetic()
+```
+
+#### Illustrations with a phonemic transcription only _corr
+
+```{r fig.cap=capFig("Sankey diagram for counts of Illustrations with a phonemic transcription only when there is at least one r in the Illustration, focusing on the consonant chart (left) or on the phonemic transcription (right). _corr")}
+withR_IPA_corr %>%
+    dplyr::filter(is.na(phonetic) & !is.na(phonemic)) %>% 
+create_Sankey_diagram_phonemic()
+```
+
+
+```{r}
+sIPA_counts_corr <- systematic_review_IPA_counts_corr %>%
+                  dplyr::select(glottocode,transcription_phon,phoneme,
+                                phonetic,phonemic,tap_pt,tap_pm,total_rhotics) %>% 
+              dplyr::left_join(jipa_texts,by="glottocode") %>% 
+              dplyr::mutate(rhoticity = total_rhotics/text_count,
+                            trill_pt_rhoticity = phonetic/total_rhotics,
+                            trill_pm_rhoticity = phonemic/total_rhotics,
+                            tap_pt_rhoticity = tap_pt/total_rhotics,
+                            tap_pm_rhoticity = tap_pm/total_rhotics,
+                            trill_pm_freq = phonemic/text_count,
+                            trill_pt_freq = phonetic/text_count,
+                            tap_pm_freq = tap_pm/text_count,
+                            tap_pt_freq = tap_pt/text_count)
+
+
+withR_IPA_corr <- sIPA_counts_corr %>% dplyr::filter(phonetic > 0 | phonemic > 0 | stringr::str_detect(transcription_phon,"r") == TRUE |
+                              stringr::str_detect(phoneme,"r") == TRUE)
+
+withTAP_IPA_corr <- sIPA_counts_corr %>% dplyr::filter(tap_pt > 0 | tap_pm > 0 | stringr::str_detect(transcription_phon,"ɾ") == TRUE |
+                                             stringr::str_detect(phoneme,"ɾ") == TRUE) 
+```
+
+#### Trill frequency _corr
+
+```{r fig.cap=capFig("Phonetic trills frequency")}
+
+plot_trill_pt_frequency_corr <- withR_IPA_corr %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=trill_pt_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Trill [r] frequency")
+
+ggExtra::ggMarginal(plot_trill_pt_frequency_corr,type = "histogram")
+
+```
+
+We give the following values for the phonetic trill frequency:
+
+* Maximum = `r round(max(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withR_IPA_corr$trill_pt_freq,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`
+
+`r nrow(dplyr::select(withR_IPA_corr,trill_pt_freq) %>%  dplyr::filter(trill_pt_freq == 0))` Illustrations that do not contain [r] in their transcription.
+
+```{r data preparation for wilcoxon test _corr}
+withR_IPA_wilcox <- dplyr::select(withR_IPA_corr,glottocode,rhoticity,trill_pt_freq) %>% 
+  tidyr::gather(key="Parameters",value="Value",rhoticity,trill_pt_freq)
+
+
+wilcox_trill_rhoticity_corr <- rstatix::wilcox_test(withR_IPA_wilcox, Value ~ Parameters,
+                                               alternative="greater")
+```
+
+We performed a Wilcoxon test showing that the trill frequency is thus significantly lower than the mean of rhoticity (*p*=`r as.character(wilcox_trill_rhoticity_corr[1,"p"])`).
+
+```{r data preparation for counts where pt_trill different of total_rhotics _corr}
+count_illustrations_diff_rho_trill_corr <- withR_IPA_corr %>% 
+  dplyr::filter(!is.na(phonetic) & phonetic!=total_rhotics) %>% 
+  dplyr::mutate(phoneme_count = ifelse(phoneme == "no",0,
+                                       stringr::str_count(phoneme,"&") + 1),
+                phoneme_count = ifelse(phoneme_count>2,2,phoneme_count)) %>% 
+  dplyr::select(phoneme_count) %>%  table()
+```
+
+* `r count_illustrations_diff_rho_trill_corr[[2]]` Illustrations where there is only one rhotic segment in consonant chart
+* `r count_illustrations_diff_rho_trill_corr[[3]]` Illustrations where there is more than one rhotic segment in consonant chart
+* `r count_illustrations_diff_rho_trill_corr[[1]]` Illustrations where there is no rhotic segment in consonant chart
+
+```{r fig.cap=capFig("Phonemic trills frequency")}
+
+plot_trill_pm_frequency_corr <- withR_IPA_corr %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=trill_pm_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Trill /r/ frequency")
+
+ggExtra::ggMarginal(plot_trill_pm_frequency_corr,type = "histogram")
+
+```
+
+We give the following values for the phonemic trill frequency:
+
+* Maximum = `r round(max(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withR_IPA_corr$trill_pm_freq,na.rm = TRUE)`
+* Mean = `r round(mean(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)`
+
+Phonemic trill average frequency `r round(mean(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)` is smaller than the average rhoticity `r round(mean(withR_IPA_corr$rhoticity,na.rm = TRUE),3)`.
+Phonemic trill average frequency `r round(mean(withR_IPA_corr$trill_pm_freq,na.rm = TRUE),3)` higher than that of the phonetic trill `r round(mean(withR_IPA_corr$trill_pt_freq,na.rm = TRUE),3)`.
+
+```{r data preparation for Kruskal–Wallis test for trill _corr}
+
+kruskal_wallis_trill_corr <- withR_IPA_corr %>% dplyr::select(glottocode,rhoticity,trill_pt_freq,trill_pm_freq) %>% 
+  dplyr::group_by(glottocode) %>% 
+  tidyr::gather(key=Parameters,value=Value,rhoticity,trill_pt_freq,trill_pm_freq) 
+
+
+res.kruskal_trill_corr <-  kruskal_wallis_trill_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_trill_corr <- kruskal_wallis_trill_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::dunn_test(Value ~ Parameters) 
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic trill, phonetic trill and rhoticity followed by a Dunn post hoc test.
+There are any significant differences for frequency values of phonemic trill, phonetic trill and rhoticity (*H*(`r res.kruskal_trill_corr[1,"df"][1]`)=`r res.kruskal_trill_corr[1,"statistic"]`,*p*=`r as.character(res.kruskal_trill_corr[1,"p"])`).
+The post hoc Dunn test shows that all the pairwise differences are statistically significantly different (*p_values* = `r paste0(as.character(round(pwc_trill_corr[1,"p.adj"],5)),", ",as.character(pwc_trill_corr[2,"p.adj"]),", ",as.character(round(pwc_trill_corr[3,"p.adj"],5)))`).
+
+#### Tap frequency _corr
+
+We give the following values for the segments count in this new sample of `r nrow(withTAP_IPA_corr)` *Illustrations*, the average rhoticity is `r round(mean(withTAP_IPA_corr$rhoticity),3)`:
+
+* Maximum = `r max(withTAP_IPA_corr$text_count,na.rm = TRUE)`
+* Minimum = `r min(withTAP_IPA_corr$text_count,na.rm = TRUE)`
+* Mean = `r round(mean(withTAP_IPA_corr$text_count,na.rm = TRUE))`
+* Median = `r median(withTAP_IPA_corr$text_count,na.rm = TRUE)`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA_corr$text_count,na.rm = TRUE),1)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA_corr$text_count,na.rm = TRUE),1)`
+
+```{r fig.cap=capFig("Phonetic taps frequency")}
+
+plot_tap_pt_freequency_corr <- withTAP_IPA_corr  %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=tap_pt_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point() +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Tap [ɾ] frequency")
+
+ggExtra::ggMarginal(plot_tap_pt_freequency_corr,type = "histogram")
+
+```
+
+We give the following values for the phonetic trill frequency:
+
+* Maximum = `r round(max(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE)` (corresponding to `r nrow(dplyr::filter(withTAP_IPA_corr,tap_pt == 0))` *Illustrations* that does not contain a ɾ tap symbol.)
+* Mean = `r round(mean(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE),3)`
+* Median = `r round(median(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE),3)`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA_corr$tap_pt_freq,na.rm = TRUE),3)`
+
+```{r fig.cap=capFig("Phonemic taps frequency")}
+
+plot_tap_pm_freequency_corr <- withTAP_IPA_corr  %>% 
+  ggplot2::ggplot(ggplot2::aes(x=text_count,y=tap_pm_freq)) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(legend.position = "none") +
+  ggplot2::geom_point()  +
+  ggplot2::xlab("Counts of segments in the text") +
+  ggplot2::ylab("Tap /ɾ/ frequency")
+
+ggExtra::ggMarginal(plot_tap_pm_freequency_corr,type = "histogram")
+
+```
+
+We give the following values for the phonemic trill frequency:
+
+* Maximum = `r round(max(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE),3)`
+* Minimum = `r min(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE)` 
+* Mean = `r round(mean(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE),2)`
+* Median = `r round(median(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE))`
+* Standard deviation (sd) = `r round(sd(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE),3)`
+* Interquartile range (IQR) = `r round(IQR(withTAP_IPA_corr$tap_pm_freq,na.rm = TRUE),3)`
+
+```{r data preparation for Kruskal–Wallis test for taps _corr}
+
+kruskal_wallis_tap_corr <- withTAP_IPA_corr %>% dplyr::select(glottocode,rhoticity,tap_pt_freq,tap_pm_freq) %>% 
+  dplyr::group_by(glottocode) %>% 
+  tidyr::gather(key=Parameters,value=Value,rhoticity,tap_pt_freq,tap_pm_freq) 
+
+
+res.kruskal_tap_corr <-  kruskal_wallis_tap_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_tap_corr <- kruskal_wallis_tap_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::dunn_test(Value ~ Parameters) 
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity followed by a Dunn post hoc test.
+There are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity (*H*(`r res.kruskal_tap_corr[1,"df"][1]`)=`r res.kruskal_tap_corr[1,"statistic"]`,*p*=`r as.character(res.kruskal_tap_corr[1,"p"])`).
+The post hoc Dunn test shows that all the pairwise differences are statistically significantly different (*p_values* = `r paste0(as.character(pwc_tap_corr[1,"p.adj"]),", ",as.character(pwc_tap_corr[2,"p.adj"]),", ",as.character(pwc_tap_corr[3,"p.adj"]))`).
+
+```{r data preparation for Kruskal–Wallis test for taps and trills _corr}
+
+kruskal_wallis_trill_tap_corr <- dplyr::bind_rows(kruskal_wallis_trill_corr,kruskal_wallis_tap_corr) %>% 
+  dplyr::distinct() %>% 
+  dplyr::ungroup() %>% 
+  dplyr::filter(!is.na(Value))
+
+res.kruskal_trill_tap_corr <-  kruskal_wallis_trill_tap_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  dplyr::filter(!is.na(Value)) %>% dplyr::select(-glottocode) %>% 
+  rstatix::kruskal_test(formula = Value ~ Parameters)
+
+pwc_trill_tap_corr <- kruskal_wallis_trill_tap_corr %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(Parameters = as.factor(Parameters)) %>% 
+  rstatix::dunn_test(Value ~ Parameters)
+
+```
+
+We performed a Kruskal–Wallis test to show if there are any significant differences for frequency values of phonemic trill, phonemic tap, phonetic trill, phonetic tap and rhoticity followed by a Dunn post hoc test.
+
+There are any significant differences for frequency values of phonemic tap, phonetic tap and rhoticity (*H*(`r res.kruskal_trill_tap_corr[1,"df"][1]`)=`r res.kruskal_trill_tap_corr[1,"statistic"]`,*p*=`r as.character(res.kruskal_trill_tap_corr[1,"p"])`).
+The post hoc Dunn test shows that:
+
+* phonetic trills [r] frequency was not significantly different from the phonemic taps frequency /ɾ/ (*p_value* = `r as.character(pwc_trill_tap_corr[7,"p.adj"])`)
+* phonemic trills /r/ frequency was not significantly different from the phonetic tap [ɾ] frequency (*p_value* = `r as.character(pwc_trill_tap_corr[8,"p.adj"])`)
+* /r/ are more frequent than /ɾ/ (*p_value* = `r as.character(pwc_trill_tap_corr[6,"p.adj"])`)
+* [r] is less frequent than [ɾ] (*p_value* = `r as.character(pwc_trill_tap_corr[9,"p.adj"])`)
+
+
+# References
+
+## Packages used
+```{r}
+ins.pack <- installed.packages()[names(sessionInfo()$otherPkgs), "Version"] %>% 
+  as.data.frame() %>% tibble::rownames_to_column()
+names(ins.pack)[1] <- "Packages"
+names(ins.pack)[2] <- "Version"
+
+ins.pack %>% knitr::kable()
+```
+
+## RStudio version 
+```{r}
+rstudioapi::versionInfo()
+```
+
